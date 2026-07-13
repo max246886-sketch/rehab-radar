@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>復健科進修雷達</title>
+<style>
+  :root {
+    --ink: #1c2b2d;
+    --paper: #f6f4ee;
+    --line: #d8d3c4;
+    --signal: #2f6f5e;
+    --signal-soft: #e4efe9;
+    --new-dot: #c65b3f;
+    --muted: #7a7568;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  header {
+    padding: 28px 20px 18px;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--paper);
+    z-index: 10;
+  }
+  h1 {
+    font-size: 1.15rem;
+    margin: 0 0 4px;
+    letter-spacing: 0.02em;
+  }
+  h1::before {
+    content: "◎ ";
+    color: var(--signal);
+  }
+  .subtitle { font-size: 0.8rem; color: var(--muted); margin: 0; }
+
+  .since-banner {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--signal-soft);
+    border: 1px solid var(--signal);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .since-banner.show { display: flex; }
+  .since-banner button {
+    border: none;
+    background: var(--signal);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+  }
+  .filters select, .filters input {
+    font-size: 0.82rem;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: white;
+    color: var(--ink);
+  }
+  .filters input { flex: 1; min-width: 140px; }
+
+  main { padding: 6px 20px 60px; max-width: 720px; margin: 0 auto; }
+  .count-line {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin: 14px 0 10px;
+  }
+
+  .card {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .card.is-new { padding-left: 14px; }
+  .card.is-new::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 20px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--new-dot);
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .card-source { color: var(--signal); font-weight: 600; }
+  .card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--ink);
+    text-decoration: none;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .card-title:hover { text-decoration: underline; }
+  .card-meta { font-size: 0.78rem; color: var(--muted); }
+
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    padding: 60px 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>復健科進修雷達</h1>
+  <p class="subtitle">自動盯著各學會網站，有新課程就收進來</p>
+
+  <div class="since-banner" id="sinceBanner">
+    <span id="sinceText"></span>
+    <button id="showNewBtn">只看新的</button>
+  </div>
+
+  <div class="filters">
+    <select id="sourceFilter"><option value="">全部來源</option></select>
+    <input id="searchInput" type="text" placeholder="搜尋課程名稱...">
+  </div>
+</header>
+
+<main>
+  <p class="count-line" id="countLine"></p>
+  <div id="list"></div>
+</main>
+
+<script>
+const STORAGE_LAST_VISIT = "rehabRadar_lastVisit";
+const STORAGE_FILTER_SOURCE = "rehabRadar_filterSource";
+const STORAGE_FILTER_SEARCH = "rehabRadar_filterSearch";
+
+let allCourses = [];
+let showOnlyNew = false;
+
+async function init() {
+  const res = await fetch("courses.json", { cache: "no-store" });
+  allCourses = await res.json();
+  allCourses.sort((a, b) => (b.scrapedAt || "").localeCompare(a.scrapedAt || ""));
+
+  setupSinceBanner();
+  setupFilters();
+  render();
+
+  // 這次造訪結束後才更新「上次造訪時間」，這樣使用者在這次 session 內
+  // 還是看得到「新增」標記
+  window.addEventListener("beforeunload", () => {
+    localStorage.setItem(STORAGE_LAST_VISIT, new Date().toISOString());
+  });
+}
+
+function setupSinceBanner() {
+  const lastVisit = localStorage.getItem(STORAGE_LAST_VISIT);
+  const banner = document.getElementById("sinceBanner");
+  if (!lastVisit) {
+    // 第一次來，直接記錄，不顯示 banner
+    return;
+  }
+  const newCount = allCourses.filter(c => (c.scrapedAt || "") > lastVisit).length;
+  if (newCount > 0) {
+    document.getElementById("sinceText").textContent =
+      `自你上次造訪以來新增了 ${newCount} 筆`;
+    banner.classList.add("show");
+    document.getElementById("showNewBtn").addEventListener("click", () => {
+      showOnlyNew = true;
+      render();
+    });
+  }
+}
+
+function setupFilters() {
+  const sourceSelect = document.getElementById("sourceFilter");
+  const sources = [...new Set(allCourses.map(c => c.source))].sort();
+  for (const s of sources) {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    sourceSelect.appendChild(opt);
+  }
+
+  // 還原上次的篩選條件
+  const savedSource = localStorage.getItem(STORAGE_FILTER_SOURCE) || "";
+  const savedSearch = localStorage.getItem(STORAGE_FILTER_SEARCH) || "";
+  sourceSelect.value = savedSource;
+  document.getElementById("searchInput").value = savedSearch;
+
+  sourceSelect.addEventListener("change", () => {
+    localStorage.setItem(STORAGE_FILTER_SOURCE, sourceSelect.value);
+    render();
+  });
+  document.getElementById("searchInput").addEventListener("input", (e) => {
+    localStorage.setItem(STORAGE_FILTER_SEARCH, e.target.value);
+    render();
+  });
+}
+
+function render() {
+  const lastVisit = localStorage.getItem(STORAGE_LAST_VISIT) || "";
+  const sourceFilter = document.getElementById("sourceFilter").value;
+  const searchFilter = document.getElementById("searchInput").value.trim().toLowerCase();
+
+  let list = allCourses;
+  if (sourceFilter) list = list.filter(c => c.source === sourceFilter);
+  if (searchFilter) list = list.filter(c => c.title.toLowerCase().includes(searchFilter));
+  if (showOnlyNew) list = list.filter(c => (c.scrapedAt || "") > lastVisit);
+
+  document.getElementById("countLine").textContent =
+    `共 ${list.length} 筆${showOnlyNew ? "（僅顯示新增）" : ""}`;
+
+  const listEl = document.getElementById("list");
+  listEl.innerHTML = "";
+
+  if (list.length === 0) {
+    listEl.innerHTML = `<div class="empty">沒有符合條件的課程</div>`;
+    return;
+  }
+
+  for (const c of list) {
+    const isNew = lastVisit && (c.scrapedAt || "") > lastVisit;
+    const card = document.createElement("div");
+    card.className = "card" + (isNew ? " is-new" : "");
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-source">${escapeHtml(c.source)}</span>
+        <span>${escapeHtml(c.date || "")}</span>
+      </div>
+      <a class="card-title" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>
+      <div class="card-meta">${escapeHtml(c.org || "")}${c.location ? " · " + escapeHtml(c.location) : ""}</div>
+    `;
+    listEl.appendChild(card);
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return str.replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[m]));
+}
+
+init();
+</script>
+
+</body>
+</html>
