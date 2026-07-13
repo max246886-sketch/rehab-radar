@@ -1,0 +1,35 @@
+name: Scrape rehab courses
+
+on:
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        working-directory: scraper
+        run: npm install
+
+      - name: Run scraper
+        working-directory: scraper
+        run: npm run scrape
+
+      - name: Commit updated data
+        run: |
+          git config user.name "rehab-radar-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add public/courses.json
+          git diff --staged --quiet || git commit -m "chore: update courses data"
+          git push
